@@ -1,7 +1,7 @@
 import { v2 as cloudinary } from 'cloudinary';
 import slugify from 'slugify';
 
-import redisClient from '../config/redis.js';
+import redisConfig from '../config/redisConfig.js';
 import CategoryModel from '../models/CategoryModel.js';
 
 cloudinary.config({
@@ -31,13 +31,13 @@ const createCategory = async (req, res) => {
         });
 
         const existingSlug = await CategoryModel.findOne({
-            slug,
+            name: name.trim(),
             parentId: parentId ? parentId : null,
         });
         if (existingSlug) {
             return res.status(400).json({
                 success: false,
-                message: 'Tên danh mục đã tồn tại',
+                message: 'Tên danh mục đã tồn tại trong cùng cấp',
             });
         }
 
@@ -176,7 +176,7 @@ const updateCategory = async (req, res) => {
 const getCategoriesFromUser = async (req, res) => {
     try {
         // Kiểm tra cache
-        const cacheCategories = await redisClient.get('categories');
+        const cacheCategories = await redisConfig.get('categories');
         if (cacheCategories) {
             console.log('Lấy categories từ cache');
             return res.status(200).json({
@@ -207,7 +207,7 @@ const getCategoriesFromUser = async (req, res) => {
             }
         });
 
-        redisClient.setex('categories', process.env.DEFAULT_EXPIRATION, JSON.stringify(rootCategories));
+        redisConfig.setex('categories', process.env.DEFAULT_EXPIRATION, JSON.stringify(rootCategories));
 
         return res.status(200).json({
             success: true,

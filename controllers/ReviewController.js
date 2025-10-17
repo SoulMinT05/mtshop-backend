@@ -1,4 +1,4 @@
-import { emitNewReply, emitReplyToReview } from '../config/socket.js';
+import { emitNewReply, emitReplyToReview } from '../config/socketConfig.js';
 import ReviewModel from '../models/ReviewModel.js';
 import StaffModel from '../models/StaffModel.js';
 import UserModel from '../models/UserModel.js';

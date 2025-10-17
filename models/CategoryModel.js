@@ -7,18 +7,20 @@ const categorySchema = mongoose.Schema(
             // required: true,
             trim: true,
         },
-        slug: {
-            type: String,
-        },
         images: [
             {
                 type: String,
             },
         ],
-        parentCategoryName: {
+        slug: {
             type: String,
         },
         parentCategorySlug: {
+            type: String,
+            default: null,
+        },
+
+        parentCategoryName: {
             type: String,
         },
         parentId: {

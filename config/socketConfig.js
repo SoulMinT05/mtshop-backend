@@ -2,7 +2,7 @@ import { Server } from 'socket.io';
 
 import UserModel from '../models/UserModel.js';
 import StaffModel from '../models/StaffModel.js';
-import { printOnlineUsers, removeUserFromOnline } from '../utils/socketUtils.js';
+import { printOnlineUsers } from '../utils/socketUtils.js';
 
 let io = null;
 

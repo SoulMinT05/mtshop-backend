@@ -7,15 +7,16 @@ import OrderModel from '../models/OrderModel.js';
 import VoucherModel from '../models/VoucherModel.js';
 import NotificationModel from '../models/NotificationModel.js';
 import CheckoutTokenModel from '../models/CheckoutTokenModel.js';
-import sendAccountConfirmationEmail from '../config/sendEmail.js';
-import { createOrderEmailHtml } from '../utils/emailHtml.js';
+import { createOrderEmailHtml } from '../utils/emailHtmlUtils.js';
 import {
     emitNotificationOrder,
     emitNotificationStaffCancelOrder,
     emitNotificationStaffNewOrder,
     emitOrderStatusUpdated,
     emitStaffNewOrder,
-} from '../config/socket.js';
+} from '../config/socketConfig.js';
+import { normalizeProductId } from '../utils/normalizeUtils.js';
+import { sendAccountConfirmationEmail } from '../config/emailConfig.js';
 
 const getStatusText = (status) => {
     switch (status) {
@@ -49,7 +50,10 @@ const createOrder = async (req, res) => {
 
         // Trừ số lượng tồn kho
         for (const item of token.selectedCartItems) {
-            const product = await ProductModel.findById(item.product);
+            // const product = await ProductModel.findById(item.product);
+            const query = normalizeProductId(item.product);
+            const product = await ProductModel.findOne(query);
+
             if (!product) {
                 return res.status(404).json({ success: false, message: `Không tìm thấy sản phẩm: ${item.name}` });
             }
@@ -62,6 +66,7 @@ const createOrder = async (req, res) => {
             }
 
             product.countInStock -= item.quantityProduct;
+            product.quantitySold += item.quantityProduct;
             await product.save();
         }
 

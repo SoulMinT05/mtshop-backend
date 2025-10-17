@@ -1,19 +1,18 @@
+import { v2 as cloudinary } from 'cloudinary';
+import bcryptjs from 'bcryptjs';
+import jwt from 'jsonwebtoken';
+import mongoose from 'mongoose';
+
 import UserModel from '../models/UserModel.js';
 import StaffModel from '../models/StaffModel.js';
 import ProductModel from '../models/ProductModel.js';
 import OrderModel from '../models/OrderModel.js';
-
-import bcryptjs from 'bcryptjs';
-import jwt from 'jsonwebtoken';
-import sendAccountConfirmationEmail from '../config/sendEmail.js';
-import { verifyEmailHtml } from '../utils/emailHtml.js';
-import generateAccessToken from '../utils/generateAccessToken.js';
-import generateRefreshToken from '../utils/generateRefreshToken.js';
-
-import redisClient from '../config/redis.js';
-
-import { v2 as cloudinary } from 'cloudinary';
 import ReviewModel from '../models/ReviewModel.js';
+import NotificationModel from '../models/NotificationModel.js';
+
+import { verifyEmailHtml } from '../utils/emailHtmlUtils.js';
+import { generateAccessToken, generateRefreshToken } from '../utils/tokenUtils.js';
+import redisConfig from '../config/redisConfig.js';
 import {
     emitDeleteReply,
     emitDeleteReview,
@@ -23,8 +22,9 @@ import {
     emitReplyToReview,
     emitStaffNewReview,
     emitUserLogout,
-} from '../config/socket.js';
-import NotificationModel from '../models/NotificationModel.js';
+} from '../config/socketConfig.js';
+import { normalizeProductId, normalizeUserId } from '../utils/normalizeUtils.js';
+import { sendAccountConfirmationEmail } from '../config/emailConfig.js';
 
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_NAME,
@@ -975,7 +975,8 @@ const updateQuantityItemsCart = async (req, res) => {
         }
 
         // ✅ Lấy thông tin sản phẩm để kiểm tra tồn kho
-        const product = await ProductModel.findById(productId).lean();
+        const query = normalizeProductId(productId);
+        const product = await ProductModel.findOne(query).lean();
         if (!product) {
             return res.status(404).json({
                 success: false,
@@ -1064,7 +1065,8 @@ const addToCart = async (req, res) => {
             });
         }
 
-        const product = await ProductModel.findById(productId).lean();
+        const query = normalizeProductId(productId);
+        const product = await ProductModel.findOne(query).lean();
         if (!product) {
             return res.status(404).json({
                 success: false,
@@ -1263,7 +1265,8 @@ const addToWishlist = async (req, res) => {
             });
         }
 
-        const product = await ProductModel.findById(productId);
+        const query = normalizeProductId(productId);
+        const product = await ProductModel.findOne(query);
         if (!product) {
             return res.status(404).json({
                 success: false,
@@ -1285,7 +1288,7 @@ const addToWishlist = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: 'Thêm vào wishlist thành công!',
+            message: 'Yêu thích thành công!',
             wishlist: wishlistItem,
         });
     } catch (error) {
@@ -1305,7 +1308,11 @@ const removeFromWishlist = async (req, res) => {
         const user = await UserModel.findById(userId);
 
         // Tìm item cần xoá
-        const removedItem = user.wishlist.find((item) => item.product.toString() === productId);
+        const removedItem = user.wishlist.find((item) => {
+            const itemProductId = item.product.toString();
+            console.log({ itemProductId, productId });
+            return item.product.toString() === productId;
+        });
         if (!removedItem) {
             return res.status(404).json({
                 success: false,
@@ -1316,7 +1323,7 @@ const removeFromWishlist = async (req, res) => {
 
         return res.status(200).json({
             success: true,
-            message: 'Đã xoá sản phẩm khỏi wishlist!',
+            message: 'Hủy yêu thích sản phẩm',
             removedItem,
             wishlistId: removedItem._id,
         });
@@ -1389,6 +1396,8 @@ const addReview = async (req, res) => {
             });
         }
 
+        const query = normalizeProductId(productId);
+
         // 1. Tìm đơn hàng đã giao có chứa sản phẩm và chưa được review
         const order = await OrderModel.findOne({
             userId,
@@ -1410,15 +1419,39 @@ const addReview = async (req, res) => {
             });
         }
 
+        // Map rating -> title
+        let title = '';
+        switch (Number(rating)) {
+            case 5:
+                title = 'Cực kỳ hài lòng';
+                break;
+            case 4:
+                title = 'Hài lòng';
+                break;
+            case 3:
+                title = 'Bình thường';
+                break;
+            case 2:
+                title = 'Không hài lòng';
+                break;
+            case 1:
+                title = 'Rất tệ';
+                break;
+            default:
+                title = 'Chưa rõ';
+                break;
+        }
+
         // 2. Tạo đánh giá mới
         const newReview = new ReviewModel({
             userId,
             productId,
             comment,
             rating,
+            title,
         });
         await newReview.save();
-        await newReview.populate('userId', 'name email avatar');
+        await newReview.populate('userId', 'name email avatar createdAt');
 
         const populatedNewReview = await ReviewModel.findById(newReview._id)
             .populate('userId', 'name email avatar')
@@ -1426,7 +1459,7 @@ const addReview = async (req, res) => {
             .populate('productId', 'name images');
 
         // 3. Gắn review vào sản phẩm
-        await ProductModel.findByIdAndUpdate(productId, {
+        await ProductModel.findOneAndUpdate(query, {
             $push: { review: newReview._id },
         });
 
@@ -1435,7 +1468,7 @@ const addReview = async (req, res) => {
         const totalRating = reviews.reduce((acc, review) => acc + Number(review.rating), 0);
         const averageRating = (totalRating / reviews.length).toFixed(1);
 
-        await ProductModel.findByIdAndUpdate(productId, {
+        await ProductModel.findOneAndUpdate(query, {
             averageRating,
             reviewCount: reviews.length,
         });
@@ -1629,16 +1662,17 @@ const getDetailsReview = async (req, res) => {
         }
 
         // const reviews = await ReviewModel.find({ productId }).populate('userId', '-refreshToken -password'); // Lấy thông tin user
-        const product = await ProductModel.findById(productId).populate({
+        const query = normalizeProductId(productId);
+        const product = await ProductModel.findOne(query).populate({
             path: 'review',
             populate: [
                 {
                     path: 'userId',
-                    select: 'name avatar',
+                    select: 'name avatar email createdAt',
                 },
                 {
                     path: 'replies.userId', // ✅ thêm dòng này để populate người reply
-                    select: 'name avatar',
+                    select: 'name avatar email createdAt',
                 },
             ],
         });
@@ -1656,20 +1690,56 @@ const getReviewsBySlugProduct = async (req, res) => {
             return res.status(400).json({ message: 'ID sản phẩm không hợp lệ.' });
         }
 
-        const product = await ProductModel.findOne({ slug }).populate({
-            path: 'review',
-            populate: [
-                {
-                    path: 'userId',
-                    select: 'name avatar',
-                },
-                {
-                    path: 'replies.userId', // ✅ thêm dòng này để populate người reply
-                    select: 'name avatar',
-                },
-            ],
+        // 🔹 Cắt productId từ slug
+        const match = slug.match(/-p([a-zA-Z0-9]+)$/);
+        if (!match) {
+            return res.status(400).json({ message: 'Slug sản phẩm không đúng định dạng.' });
+        }
+
+        const rawId = match[1];
+        const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
+        console.log({ rawId, isObjectId });
+
+        const page = parseInt(req.query.page) || 1;
+        const perPage = parseInt(req.query.perPage) || process.env.LIMIT_DEFAULT;
+        const skip = (page - 1) * perPage;
+
+        let query = {};
+        if (isObjectId) {
+            query.productId = new mongoose.Types.ObjectId(rawId);
+        } else {
+            query.productIdCrawl = rawId;
+        }
+
+        console.log(1);
+
+        const [reviews, totalReviews] = await Promise.all([
+            ReviewModel.find(query)
+                .populate([
+                    {
+                        path: 'userId',
+                        select: 'name avatar email createdAt',
+                    },
+                    {
+                        path: 'replies.userId',
+                        select: 'name avatar email createdAt',
+                    },
+                ])
+                .skip(skip)
+                .limit(perPage)
+                .sort({ createdAt: -1 }), // mới nhất trước
+            ReviewModel.countDocuments(query),
+        ]);
+        res.status(200).json({
+            success: true,
+            // productId,
+            query,
+            reviews,
+            totalPages: Math.ceil(totalReviews / perPage),
+            totalReviews,
+            page,
+            perPage,
         });
-        res.status(200).json({ success: true, product });
     } catch (error) {
         console.error('Lỗi khi lấy danh sách review:', error.message);
         res.status(500).json({ message: 'Lỗi server khi lấy đánh giá.' });
@@ -1679,7 +1749,7 @@ const getReviewsBySlugProduct = async (req, res) => {
 const getReviews = async (req, res) => {
     try {
         const reviews = await ReviewModel.find()
-            .populate('userId', 'name avatar')
+            .populate('userId', 'name email avatar createdAt')
             .populate('replies.userId', 'name avatar'); // Lấy thông tin user
         res.status(200).json({ success: true, reviews });
     } catch (error) {
@@ -1862,8 +1932,9 @@ const getUserDetailsFromAdmin = async (req, res) => {
 const toggleUserLockStatus = async (req, res) => {
     try {
         const { userId } = req.params;
+        const query = normalizeUserId(userId);
 
-        const user = await UserModel.findById(userId);
+        const user = await UserModel.findOne(query);
         if (!user) {
             return res.status(404).json({
                 success: false,
@@ -1920,7 +1991,10 @@ const updateUserInfoFromAdmin = async (req, res) => {
 
         // ✅ Cập nhật thông tin
         if (name) user.name = name;
-        if (phoneNumber) user.phoneNumber = phoneNumber;
+        if (phoneNumber !== undefined) {
+            user.phoneNumber = phoneNumber;
+        }
+
         user.address = {
             streetLine: streetLine || user.address?.streetLine || '',
             ward: ward || user.address?.ward || '',

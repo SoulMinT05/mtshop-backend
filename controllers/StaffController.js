@@ -1,13 +1,11 @@
-import StaffModel from '../models/StaffModel.js';
-
 import bcryptjs from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import sendAccountConfirmationEmail from '../config/sendEmail.js';
-import { verifyEmailHtml } from '../utils/emailHtml.js';
-import generateAccessToken from '../utils/generateAccessToken.js';
-import generateRefreshToken from '../utils/generateRefreshToken.js';
-
 import { v2 as cloudinary } from 'cloudinary';
+
+import StaffModel from '../models/StaffModel.js';
+import { verifyEmailHtml } from '../utils/emailHtmlUtils.js';
+import { generateAccessToken, generateRefreshToken } from '../utils/tokenUtils.js';
+import { sendAccountConfirmationEmail } from '../config/emailConfig.js';
 
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_NAME,

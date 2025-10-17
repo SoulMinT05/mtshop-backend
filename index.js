@@ -1,27 +1,18 @@
 // SOCKET IO
-import { Server } from 'socket.io';
 import http from 'http';
-import { initSocket } from './config/socket.js';
+import { initSocket } from './config/socketConfig.js';
 
 import express from 'express';
 import cors from 'cors';
 import bodyParser from 'body-parser';
 import dotenv from 'dotenv';
-import Redis from 'redis';
-
-const redisClient = Redis
-    .createClient
-    // {
-    // url: // production
-    // }
-    ();
 
 dotenv.config();
 
 import cookieParser from 'cookie-parser';
 import morgan from 'morgan';
 import helmet from 'helmet';
-import dbConnect from './config/dbConnect.js';
+import dbConfig from './config/dbConfig.js';
 import route from './routes/index.js';
 
 const app = express();
@@ -59,7 +50,7 @@ app.get('/', (req, res) => {
     });
 });
 
-dbConnect().then(() => {
+dbConfig().then(() => {
     server.listen(port, () => {
         console.log('Server is running in ' + port);
     });

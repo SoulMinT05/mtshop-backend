@@ -54,11 +54,11 @@ import upload from '../ middlewares/multer.js';
 const userRouter = Router();
 
 // REVIEW
-userRouter.delete('/deleteReplyFromReview/:reviewId/:replyId', verifyAccessToken, deleteReplyFromReview);
-userRouter.delete('/deleteReview/:reviewId', verifyAccessToken, deleteReview);
+// userRouter.delete('/deleteReplyFromReview/:reviewId/:replyId', verifyAccessToken, deleteReplyFromReview);
 userRouter.post('/addReplyToReview/:reviewId', verifyAccessToken, addReplyToReview);
+userRouter.delete('/deleteReview/:reviewId', verifyAccessToken, deleteReview);
+
 userRouter.get('/reviews/getReviewsBySlugProduct/:slug', getReviewsBySlugProduct);
-userRouter.get('/reviews/:productId', getDetailsReview);
 userRouter.post('/addReview', verifyAccessToken, addReview);
 userRouter.get('/all-reviews', getReviews);
 
@@ -99,20 +99,20 @@ userRouter.get('/getAllWishlists', verifyAccessToken, getAllWishlists);
 userRouter.put('/update-address', verifyAccessToken, updateAddress);
 
 // FOR ADMIN
-userRouter.delete('/deleteUserFromAdmin/:userId', verifyAccessToken, deleteUserFromAdmin);
 userRouter.delete('/deleteReviewFromAdmin/:reviewId', verifyAccessToken, deleteReviewFromAdmin);
-userRouter.get('/userDetailsFromAdmin/:userId', verifyAccessToken, getUserDetailsFromAdmin);
-userRouter.patch('/toggleUserLockStatus/:userId', verifyAccessToken, toggleUserLockStatus);
+userRouter.delete('/deleteUserFromAdmin/:userId', verifyAccessToken, deleteUserFromAdmin);
 userRouter.patch(
     '/updateUserInfoFromAdmin/:userId',
     upload.single('avatar'),
     verifyAccessToken,
     updateUserInfoFromAdmin
 );
+userRouter.patch('/toggleUserLockStatus/:userId', verifyAccessToken, toggleUserLockStatus);
+userRouter.get('/userDetailsFromAdmin/:userId', verifyAccessToken, getUserDetailsFromAdmin);
 
-userRouter.post('/addUserFromAdmin', upload.single('avatar'), verifyAccessToken, addUserFromAdmin);
-userRouter.get('/usersFromAdmin', verifyAccessToken, getUsersFromAdmin);
 userRouter.delete('/deleteMultipleUsersFromAdmin', verifyAccessToken, deleteMultipleUsersFromAdmin);
 userRouter.delete('/deleteMultipleReviewsFromAdmin', verifyAccessToken, deleteMultipleReviewsFromAdmin);
+userRouter.post('/addUserFromAdmin', upload.single('avatar'), verifyAccessToken, addUserFromAdmin);
+userRouter.get('/usersFromAdmin', verifyAccessToken, getUsersFromAdmin);
 
 export default userRouter;

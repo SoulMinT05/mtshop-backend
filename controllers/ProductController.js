@@ -1,13 +1,17 @@
 import slugify from 'slugify';
 import { v2 as cloudinary } from 'cloudinary';
+import { v4 as uuidv4 } from 'uuid';
 
 import UserModel from '../models/UserModel.js';
 import ProductModel from '../models/ProductModel.js';
 import ProductRamModel from '../models/ProductRamModel.js';
 import ProductWeightModel from '../models/ProductWeightModel.js';
 import ProductSizeModel from '../models/ProductSizeModel.js';
+import CategoryModel from '../models/CategoryModel.js';
 
-import redisClient from '../config/redis.js';
+import redisConfig from '../config/redisConfig.js';
+import { normalizeProductsExceptId, normalizeProductId } from '../utils/normalizeUtils.js';
+import { updateProductSlug } from '../utils/slugUtils.js';
 
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_NAME,
@@ -61,14 +65,33 @@ const createProduct = async (req, res) => {
             });
         }
 
+        // --- Slug cho category / subCategory / thirdSubCategory ---
+        const categorySlug = categoryName ? slugify(categoryName, { lower: true, locale: 'vi', strict: true }) : '';
+        const subCategorySlug = subCategoryName
+            ? slugify(subCategoryName, { lower: true, locale: 'vi', strict: true })
+            : '';
+        const thirdSubCategorySlug = thirdSubCategoryName
+            ? slugify(thirdSubCategoryName, { lower: true, locale: 'vi', strict: true })
+            : '';
+
         // Handle images
         const images = req.files; // nhiều ảnh
 
+        console.log(
+            'Files nhận từ FE:',
+            req.files.map((f) => f.originalname)
+        );
         let imageUrls = [];
         if (images && images.length > 0) {
             imageUrls = await Promise.all(
                 images?.map(async (img) => {
-                    const uploadedImage = await cloudinary.uploader.upload(img.path); // upload ảnh lên Cloudinary (hoặc bất kỳ dịch vụ nào khác)
+                    const uploadedImage = await cloudinary.uploader.upload(img.path, {
+                        resource_type: 'image', // chỉ upload ảnh, tránh Cloudinary đoán
+                        overwrite: false, // không ghi đè
+                        unique_filename: true, // đảm bảo tên file duy nhất
+                        use_filename: true,
+                    }); // upload ảnh lên Cloudinary (hoặc bất kỳ dịch vụ nào khác)
+
                     return uploadedImage.url; // trả về URL ảnh đã tải lên
                 })
             );
@@ -77,7 +100,7 @@ const createProduct = async (req, res) => {
         // Create product
         const newProduct = await ProductModel.create({
             name,
-            slug,
+            // slug,
             images: imageUrls,
             description,
             brand,
@@ -90,6 +113,9 @@ const createProduct = async (req, res) => {
             subCategoryName,
             thirdSubCategoryId,
             thirdSubCategoryName,
+            categorySlug,
+            subCategorySlug,
+            thirdSubCategorySlug,
             category: categoryId,
             countInStock,
             rating,
@@ -112,92 +138,6 @@ const createProduct = async (req, res) => {
             success: true,
             message: 'Tạo sản phẩm thành công',
             newProduct,
-        });
-    } catch (error) {
-        console.error('Create category error: ', error);
-        return res.status(500).json({
-            success: false,
-            message: error.message || error,
-        });
-    }
-};
-
-const createProductRam = async (req, res) => {
-    try {
-        const { name } = req.body;
-
-        if (!name) {
-            return res.status(400).json({
-                success: false,
-                message: 'Cần nhập RAM sản phẩm',
-            });
-        }
-
-        const existingProductRam = await ProductRamModel.findOne({ name });
-        if (existingProductRam) {
-            return res.status(400).json({
-                success: false,
-                message: 'Tên RAM sản phẩm đã tồn tại!',
-            });
-        }
-
-        const newProductRam = await ProductRamModel.create({
-            name,
-        });
-        if (!newProductRam) {
-            return res.status(400).json({
-                success: false,
-                message: 'Tạo RAM sản phẩm thất bại!',
-            });
-        }
-
-        return res.status(201).json({
-            success: true,
-            message: 'Tạo RAM sản phẩm thành công',
-            newProductRam,
-        });
-    } catch (error) {
-        console.error('Create category error: ', error);
-        return res.status(500).json({
-            success: false,
-            message: error.message || error,
-        });
-    }
-};
-
-const createProductWeight = async (req, res) => {
-    try {
-        const { name } = req.body;
-
-        if (!name) {
-            return res.status(400).json({
-                success: false,
-                message: 'Cần nhập cân nặng sản phẩm',
-            });
-        }
-
-        const existingProductWeight = await ProductWeightModel.findOne({ name });
-        if (existingProductWeight) {
-            return res.status(400).json({
-                success: false,
-                message: 'Cân nặng này đã tồn tại!',
-            });
-        }
-
-        const newProductWeight = await ProductWeightModel.create({
-            name,
-        });
-        if (!newProductWeight) {
-            return res.status(400).json({
-                success: false,
-                message: 'Tạo cân nặng sản phẩm thất bại!',
-            });
-        }
-
-        return res.status(201).json({
-            success: true,
-            message: 'Tạo cân nặng sản phẩm thành công',
-            newProductWeight,
         });
     } catch (error) {
         console.error('Create category error: ', error);
@@ -255,8 +195,6 @@ const getProductsAdmin = async (req, res) => {
     try {
         let { field, value } = req.query;
         const filter = {};
-
-        console.log('field, value: ', field, value);
 
         if (field && value) {
             if (typeof value === 'string') {
@@ -357,56 +295,59 @@ const getProductsAdmin = async (req, res) => {
 
 const getProductsUser = async (req, res) => {
     try {
+        // phân trang
         const page = parseInt(req.query.page) || 1;
-        const perPage = parseInt(req.query.perPage) || process.env.LIMIT_PRODUCTS;
-        const totalProducts = await ProductModel.countDocuments({ isPublished: true });
+        const perPage = parseInt(req.query.perPage) || parseInt(process.env.LIMIT_PRODUCTS);
+        const skip = (page - 1) * perPage;
+
+        const filter = { isPublished: true };
+
+        // cache key phân biệt page & perPage
+        const cacheKey = `products:user?page=${page}&perPage=${perPage}`;
+
+        const cachedProducts = await redisConfig.get(cacheKey);
+        if (cachedProducts) {
+            console.log('Lấy products user từ Cache');
+            const { products, totalProducts } = JSON.parse(cachedProducts);
+            return res.status(200).json({
+                success: true,
+                products,
+                totalPages: Math.ceil(totalProducts / perPage),
+                totalProducts,
+                page,
+                perPage,
+            });
+        }
+
+        console.log('Lấy products user từ DB');
+        const [products, totalProducts] = await Promise.all([
+            ProductModel.find(filter).skip(skip).limit(perPage).exec(),
+            ProductModel.countDocuments(filter),
+        ]);
+
         const totalPages = Math.ceil(totalProducts / perPage);
 
-        if (page > totalPages) {
+        if (page > totalPages && totalProducts > 0) {
             return res.status(404).json({
                 success: false,
                 message: 'Trang không tìm thấy',
             });
         }
 
-        // // Kiểm tra nếu có Redis
-        const cachedProducts = await redisClient.get(`products:user?page=${page}&perPage=${perPage}`);
-        if (cachedProducts) {
-            console.log('Lấy products user từ Cache');
-            return res.status(200).json({
-                success: true,
-                products: JSON.parse(cachedProducts),
-                totalPages,
-                page,
-            });
-        }
-        // Nếu không có cache, lấy từ DB
-        console.log('Lấy products user từ DB');
-        const products = await ProductModel.find({ isPublished: true })
-            .populate('category')
-            .skip((page - 1) * perPage)
-            .limit(perPage)
-            .exec();
-
-        if (!products) {
-            return res.status(500).json({
-                success: false,
-                message: 'Không tìm thấy sản phẩm',
-            });
-        }
-
-        // Lưu vào Redis với TTL
-        redisClient.setex(
-            `products:user?page=${page}&perPage=${perPage}`,
+        // lưu cache kèm totalProducts để trả đúng
+        redisConfig.setex(
+            cacheKey,
             parseInt(process.env.DEFAULT_EXPIRATION),
-            JSON.stringify(products)
+            JSON.stringify({ products, totalProducts })
         );
 
         return res.status(200).json({
             success: true,
             products,
             totalPages,
+            totalProducts,
             page,
+            perPage,
         });
     } catch (error) {
         return res.status(500).json({
@@ -416,39 +357,62 @@ const getProductsUser = async (req, res) => {
     }
 };
 
-const getProductsRam = async (req, res) => {
+const getLatestProducts = async (req, res) => {
     try {
-        const productsRam = await ProductRamModel.find();
-        if (!productsRam) {
-            return res.status(500).json({
-                success: false,
-                message: 'Không tìm thấy RAM sản phẩm',
-            });
-        }
-        return res.status(200).json({
-            success: true,
-            productsRam,
-        });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message || error,
-        });
-    }
-};
+        // Lấy query phân trang
+        const page = parseInt(req.query.page) || 1;
+        const perPage = parseInt(req.query.perPage) || parseInt(process.env.LIMIT_PRODUCTS);
+        const skip = (page - 1) * perPage;
 
-const getProductsWeight = async (req, res) => {
-    try {
-        const productsWeight = await ProductWeightModel.find();
-        if (!productsWeight) {
-            return res.status(500).json({
-                success: false,
-                message: 'Không tìm thấy cân nặng sản phẩm',
+        const filter = { isFeatured: true, isPublished: true };
+
+        // cache key riêng biệt cho feature
+        const cacheKey = `products:featured?page=${page}&perPage=${perPage}`;
+
+        // Kiểm tra cache
+        const cachedProducts = await redisConfig.get(cacheKey);
+        if (cachedProducts) {
+            console.log('✅ Lấy featured products từ Cache');
+            const { products, totalProducts } = JSON.parse(cachedProducts);
+            return res.status(200).json({
+                success: true,
+                products,
+                totalPages: Math.ceil(totalProducts / perPage),
+                totalProducts,
+                page,
+                perPage,
             });
         }
+
+        console.log('🗃️ Lấy featured products từ DB');
+        const [products, totalProducts] = await Promise.all([
+            ProductModel.find(filter).populate('category').sort({ createdAt: -1 }).skip(skip).limit(perPage).exec(),
+            ProductModel.countDocuments(filter),
+        ]);
+
+        const totalPages = Math.ceil(totalProducts / perPage);
+
+        if (page > totalPages && totalProducts > 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Trang không tìm thấy',
+            });
+        }
+
+        // Lưu cache
+        await redisConfig.setEx(
+            cacheKey,
+            parseInt(process.env.DEFAULT_EXPIRATION),
+            JSON.stringify({ products, totalProducts })
+        );
+
         return res.status(200).json({
             success: true,
-            productsWeight,
+            products,
+            totalPages,
+            totalProducts,
+            page,
+            perPage,
         });
     } catch (error) {
         return res.status(500).json({
@@ -479,10 +443,95 @@ const getProductsSize = async (req, res) => {
     }
 };
 
+const getProductsByCategorySlug = async (req, res) => {
+    try {
+        const { slug } = req.params;
+        const page = parseInt(req.query.page) || 1;
+        const perPage = parseInt(req.query.perPage) || 20;
+
+        let query = { isPublished: true };
+        let level = 'category';
+
+        // 1. Ưu tiên check thirdSubCategorySlug
+        const existThird = await ProductModel.exists({ thirdSubCategorySlug: slug });
+        if (existThird) {
+            query.thirdSubCategorySlug = slug;
+            level = 'thirdSubCategory';
+        } else {
+            // 2. Check subCategorySlug
+            const existSub = await ProductModel.exists({ subCategorySlug: slug });
+            if (existSub) {
+                query.subCategorySlug = slug;
+                level = 'subCategory';
+            } else {
+                // 3. Check categorySlug
+                const category = await CategoryModel.findOne({ slug });
+                if (!category) {
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Không tìm thấy danh mục',
+                    });
+                }
+
+                // lấy toàn bộ slug con cháu
+                const collectSlugs = async (slug) => {
+                    const slugs = [slug];
+                    const children = await CategoryModel.find({ parentCategorySlug: slug }).select('slug');
+                    for (let child of children) {
+                        const subSlugs = await collectSlugs(child.slug);
+                        slugs.push(...subSlugs);
+                    }
+                    return slugs;
+                };
+                const allSlugs = await collectSlugs(slug);
+                console.log('allSlugs: ', allSlugs);
+
+                query.$or = [
+                    { categorySlug: { $in: allSlugs } },
+                    { subCategorySlug: { $in: allSlugs } },
+                    { thirdSubCategorySlug: { $in: allSlugs } },
+                ];
+                level = 'category';
+            }
+        }
+
+        // 4. Query product
+        const totalProducts = await ProductModel.countDocuments(query);
+        const totalPages = Math.ceil(totalProducts / perPage);
+
+        if (page > totalPages && totalProducts > 0) {
+            return res.status(404).json({
+                success: false,
+                message: 'Trang không tìm thấy',
+            });
+        }
+
+        const products = await ProductModel.find(query)
+            .populate('category')
+            .skip((page - 1) * perPage)
+            .limit(perPage)
+            .exec();
+
+        return res.status(200).json({
+            success: true,
+            products,
+            totalPages,
+            page,
+            count: products.length,
+            searchLevel: level, // debug: third / sub / category
+        });
+    } catch (error) {
+        return res.status(500).json({
+            success: false,
+            message: error.message || error,
+        });
+    }
+};
+
 const getProductsByCategoryId = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const perPage = parseInt(req.query.perPage) || 10000;
+        const perPage = parseInt(req.query.perPage) || parseInt(process.env.LIMIT_PRODUCTS);
         const totalProducts = await ProductModel.countDocuments({
             isPublished: true,
             categoryId: req.params.id,
@@ -528,7 +577,7 @@ const getProductsByCategoryId = async (req, res) => {
 const getProductsByCategoryName = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const perPage = parseInt(req.query.perPage) || 10000;
+        const perPage = parseInt(req.query.perPage) || parseInt(process.env.LIMIT_PRODUCTS);
         const totalProducts = await ProductModel.countDocuments({
             isPublished: true,
             categoryName: req.query.categoryName,
@@ -574,7 +623,7 @@ const getProductsByCategoryName = async (req, res) => {
 const getProductsBySubCategoryId = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const perPage = parseInt(req.query.perPage) || 10000;
+        const perPage = parseInt(req.query.perPage) || parseInt(process.env.LIMIT_PRODUCTS);
         const totalProducts = await ProductModel.countDocuments({
             isPublished: true,
             subCategoryId: req.params.id,
@@ -620,7 +669,7 @@ const getProductsBySubCategoryId = async (req, res) => {
 const getProductsBySubCategoryName = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const perPage = parseInt(req.query.perPage) || 10000;
+        const perPage = parseInt(req.query.perPage) || parseInt(process.env.LIMIT_PRODUCTS);
         const totalProducts = await ProductModel.countDocuments({
             isPublished: true,
             subCategoryName: req.query.subCategoryName,
@@ -666,7 +715,7 @@ const getProductsBySubCategoryName = async (req, res) => {
 const getProductsByThirdSubCategoryId = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const perPage = parseInt(req.query.perPage) || 10000;
+        const perPage = parseInt(req.query.perPage) || parseInt(process.env.LIMIT_PRODUCTS);
         const totalProducts = await ProductModel.countDocuments({
             isPublished: true,
             thirdSubCategoryId: req.params.id,
@@ -712,7 +761,7 @@ const getProductsByThirdSubCategoryId = async (req, res) => {
 const getProductsByThirdSubCategoryName = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const perPage = parseInt(req.query.perPage) || 10000;
+        const perPage = parseInt(req.query.perPage) || parseInt(process.env.LIMIT_PRODUCTS);
         const totalProducts = await ProductModel.countDocuments({
             isPublished: true,
             thirdSubCategoryName: req.query.thirdSubCategoryName,
@@ -807,7 +856,7 @@ const getProductsByPrice = async (req, res) => {
 const getProductsByRating = async (req, res) => {
     try {
         const page = parseInt(req.query.page) || 1;
-        const perPage = parseInt(req.query.perPage) || 10000;
+        const perPage = parseInt(req.query.perPage) || parseInt(process.env.LIMIT_PRODUCTS);
 
         const filterQuery = {
             isPublished: true,
@@ -914,35 +963,12 @@ const getProductsCount = async (req, res) => {
     }
 };
 
-const getProductsByFeature = async (req, res) => {
-    try {
-        const products = await ProductModel.find({
-            isFeatured: true,
-        })
-            .populate('category')
-            .sort({ createdAt: -1 });
-
-        if (!products) {
-            return res.status(500).json({
-                success: false,
-                message: 'Không tìm thấy sản phẩm',
-            });
-        }
-        return res.status(200).json({
-            success: true,
-            products,
-        });
-    } catch (error) {
-        return res.status(500).json({
-            success: false,
-            message: error.message || error,
-        });
-    }
-};
-
 const deleteProduct = async (req, res) => {
     try {
-        const product = await ProductModel.findById(req.params.id).populate('category');
+        const productId = req.params.id;
+        const query = normalizeProductId(productId);
+
+        const product = await ProductModel.findOne(query).populate('category');
         if (!product) {
             return res.status(404).json({
                 success: false,
@@ -961,7 +987,7 @@ const deleteProduct = async (req, res) => {
             }
         }
 
-        const deletedProduct = await ProductModel.findByIdAndDelete(req.params.id);
+        const deletedProduct = await ProductModel.findOneAndDelete(query);
         if (!deletedProduct) {
             return res.status(404).json({
                 success: false,
@@ -1171,10 +1197,11 @@ const deleteMultipleProductSize = async (req, res) => {
 const getDetailsProductFromAdmin = async (req, res) => {
     try {
         const productId = req.params.id;
+        const query = normalizeProductId(productId);
 
         // Query DB
         console.log('Lấy details product từ DB');
-        const product = await ProductModel.findById(productId)
+        const product = await ProductModel.findOne(query)
             .populate('category')
             .populate({
                 path: 'review', // field trong ProductModel
@@ -1208,7 +1235,7 @@ const getDetailsProductFromUser = async (req, res) => {
         const cacheKey = `product:user:${productId}`;
 
         // Kiểm tra cache
-        const cacheDetailsProduct = await redisClient.get(cacheKey);
+        const cacheDetailsProduct = await redisConfig.get(cacheKey);
         if (cacheDetailsProduct) {
             console.log('Lấy details product từ cache');
             return res.status(200).json({
@@ -1219,7 +1246,8 @@ const getDetailsProductFromUser = async (req, res) => {
 
         // Query DB
         console.log('Lấy details product từ DB');
-        const product = await ProductModel.findById(productId).populate('category');
+        const query = normalizeProductId(productId);
+        const product = await ProductModel.findOne(query).populate('category');
         if (!product) {
             return res.status(400).json({
                 success: false,
@@ -1227,7 +1255,7 @@ const getDetailsProductFromUser = async (req, res) => {
             });
         }
 
-        redisClient.setex(cacheKey, process.env.DEFAULT_EXPIRATION, JSON.stringify(product));
+        redisConfig.setex(cacheKey, process.env.DEFAULT_EXPIRATION, JSON.stringify(product));
 
         return res.status(200).json({
             success: true,
@@ -1247,7 +1275,7 @@ const getDetailsProductFromUserBySlug = async (req, res) => {
         const cacheKey = `product:user:${slug}`;
 
         // Kiểm tra cache
-        const cacheDetailsProduct = await redisClient.get(cacheKey);
+        const cacheDetailsProduct = await redisConfig.get(cacheKey);
         if (cacheDetailsProduct) {
             console.log('Lấy details product từ cache');
             return res.status(200).json({
@@ -1266,7 +1294,7 @@ const getDetailsProductFromUserBySlug = async (req, res) => {
             });
         }
 
-        redisClient.setex(cacheKey, process.env.DEFAULT_EXPIRATION, JSON.stringify(product));
+        redisConfig.setex(cacheKey, process.env.DEFAULT_EXPIRATION, JSON.stringify(product));
 
         return res.status(200).json({
             success: true,
@@ -1310,7 +1338,6 @@ const updateProduct = async (req, res) => {
             name,
             description,
             brand,
-            price,
             oldPrice,
             categoryName,
             categoryId,
@@ -1333,11 +1360,7 @@ const updateProduct = async (req, res) => {
         const numericOldPrice = Number(oldPrice);
         const numericDiscount = Number(discount);
         const numericPrice =
-            price !== undefined
-                ? Number(price)
-                : numericOldPrice && numericDiscount
-                ? numericOldPrice - (numericOldPrice * numericDiscount) / 100
-                : numericOldPrice;
+            numericOldPrice > 0 ? Math.max(0, numericOldPrice - (numericOldPrice * numericDiscount) / 100) : 0;
 
         // Handle slug
         let slug = undefined;
@@ -1354,8 +1377,10 @@ const updateProduct = async (req, res) => {
 
             const existingSlug = await ProductModel.findOne({
                 slug,
-                _id: { $ne: req.params.id },
+                // _id: { $ne: req.params.id },
+                ...normalizeProductsExceptId(req.params.id, true), // true = exclude
             });
+            console.log({ existingSlug });
             if (existingSlug) {
                 return res.status(400).json({
                     success: false,
@@ -1364,12 +1389,21 @@ const updateProduct = async (req, res) => {
             }
         }
 
+        // --- Slug cho category / subCategory / thirdSubCategory ---
+        const categorySlug = categoryName ? slugify(categoryName, { lower: true, locale: 'vi', strict: true }) : '';
+        const subCategorySlug = subCategoryName
+            ? slugify(subCategoryName, { lower: true, locale: 'vi', strict: true })
+            : '';
+        const thirdSubCategorySlug = thirdSubCategoryName
+            ? slugify(thirdSubCategoryName, { lower: true, locale: 'vi', strict: true })
+            : '';
+
         const updateData = {
             name,
             description,
             brand,
-            price: numericPrice,
-            oldPrice: numericOldPrice,
+            price: numericPrice || 0,
+            oldPrice: numericOldPrice || 0,
             categoryName,
             categoryId,
             category,
@@ -1377,21 +1411,25 @@ const updateProduct = async (req, res) => {
             subCategoryName,
             thirdSubCategoryId,
             thirdSubCategoryName,
-            countInStock,
+            categorySlug,
+            subCategorySlug,
+            thirdSubCategorySlug,
+            countInStock: countInStock || 0,
             rating,
             isFeatured,
             isPublished,
-            discount: numericDiscount,
+            discount: numericDiscount || 0,
             productRam,
             productSize,
             productWeight,
         };
         if (slug) {
-            updateData.slug = slug;
+            // updateData.slug = slug;
+            updateData.slug = updateProductSlug(name, req.params.id);
         }
 
-        const product = await ProductModel.findByIdAndUpdate(req.params.id, updateData, { new: true });
-
+        const query = normalizeProductId(req.params.id);
+        const product = await ProductModel.findOneAndUpdate(query, updateData, { new: true });
         if (!product) {
             return res.status(400).json({
                 success: false,
@@ -1399,6 +1437,7 @@ const updateProduct = async (req, res) => {
             });
         }
 
+        // Handle images
         let deletedImages = [];
         try {
             const raw = req.body.deletedImages;
@@ -1556,16 +1595,22 @@ const filterProducts = async (req, res) => {
         categoryId,
         subCategoryId,
         thirdSubCategoryId,
+        slug,
         minPrice,
         maxPrice,
+        productSize,
         rating,
         page = 1,
         limit = process.env.LIMIT_PRODUCTS,
         keyword,
         stockStatus,
+        sortBy = 'name',
+        order = 'asc',
     } = req.body;
 
     const filters = {};
+    let searchLevel = null;
+
     if (categoryId?.length) {
         filters.categoryId = { $in: categoryId };
     }
@@ -1575,11 +1620,60 @@ const filterProducts = async (req, res) => {
     if (thirdSubCategoryId?.length) {
         filters.thirdSubCategoryId = { $in: thirdSubCategoryId };
     }
+
+    // Slug
+    if (slug) {
+        // 1. Check third
+        const existThird = await ProductModel.exists({ thirdSubCategorySlug: slug });
+        if (existThird) {
+            filters.thirdSubCategorySlug = slug;
+            searchLevel = 'thirdSubCategory';
+        } else {
+            // 2. Check sub
+            const existSub = await ProductModel.exists({ subCategorySlug: slug });
+            if (existSub) {
+                filters.subCategorySlug = slug;
+                searchLevel = 'subCategory';
+            } else {
+                // 3. Check category
+                const category = await CategoryModel.findOne({ slug });
+                if (!category) {
+                    return res.status(404).json({
+                        success: false,
+                        message: 'Không tìm thấy danh mục',
+                    });
+                }
+
+                // lấy toàn bộ slug con cháu
+                const collectSlugs = async (slug) => {
+                    const slugs = [slug];
+                    const children = await CategoryModel.find({ parentCategorySlug: slug }).select('slug');
+                    for (let child of children) {
+                        const subSlugs = await collectSlugs(child.slug);
+                        slugs.push(...subSlugs);
+                    }
+                    return slugs;
+                };
+                const allSlugs = await collectSlugs(slug);
+
+                filters.$or = [
+                    { categorySlug: { $in: allSlugs } },
+                    { subCategorySlug: { $in: allSlugs } },
+                    { thirdSubCategorySlug: { $in: allSlugs } },
+                ];
+                searchLevel = 'category';
+            }
+        }
+    }
+
     if (minPrice || maxPrice) {
         filters.price = {
             $gte: +minPrice || 0,
             $lte: +maxPrice || Infinity,
         };
+    }
+    if (productSize?.length) {
+        filters.productSize = { $in: productSize };
     }
     if (rating?.length) {
         filters.rating = { $in: rating };
@@ -1591,35 +1685,43 @@ const filterProducts = async (req, res) => {
         filters.countInStock = 0;
     }
 
-    // ✅ Thêm lọc theo keyword (name hoặc description)
+    // Keyword
     if (keyword && keyword.trim() !== '') {
         const regex = new RegExp(keyword.trim(), 'i'); // không phân biệt hoa thường
         filters.$or = [
             { name: { $regex: regex } },
             // { description: { $regex: regex } },
-            // { categoryName: { $regex: regex } },
-            // { subCategoryName: { $regex: regex } },
-            // { thirdSubCategoryName: { $regex: regex } },
-            // { brand: { $regex: regex } },
+            { categoryName: { $regex: regex } },
+            { subCategoryName: { $regex: regex } },
+            { thirdSubCategoryName: { $regex: regex } },
         ];
     }
 
     try {
+        // Sort option
+        let sortOption = { [sortBy]: order === 'asc' ? 1 : -1 };
+        if (sortBy === 'isFeatured') {
+            sortOption = { isFeatured: -1, createdAt: -1 };
+        }
+
         // ✅ Tạo cache key duy nhất từ filter
         const cacheKey =
             `products` +
+            (slug ? `:slug=${slug}` : '') +
             (categoryId?.length ? `:cat=${categoryId.join(',')}` : '') +
             (subCategoryId?.length ? `:sub=${subCategoryId.join(',')}` : '') +
             (thirdSubCategoryId?.length ? `:third=${thirdSubCategoryId.join(',')}` : '') +
             (minPrice ? `:min=${minPrice}` : '') +
             (maxPrice ? `:max=${maxPrice}` : '') +
+            (productSize?.length ? `:productSize=${productSize.join(',')}` : '') +
             (rating?.length ? `:rating=${rating.join(',')}` : '') +
             (keyword ? `:kw=${keyword}` : '') +
             (stockStatus ? `:stock=${stockStatus}` : '') +
+            `:sort=${sortBy}:${order}` + // thêm sort
             `:page=${page || 1}:limit=${limit || process.env.LIMIT_PRODUCTS}`;
 
         // ✅ Check cache
-        const cachedData = await redisClient.get(cacheKey);
+        const cachedData = await redisConfig.get(cacheKey);
         if (cachedData) {
             console.log('Lấy filter products từ cache');
             return res.status(200).json(JSON.parse(cachedData));
@@ -1629,6 +1731,7 @@ const filterProducts = async (req, res) => {
         console.log('Lấy filter products từ DB');
         const products = await ProductModel.find(filters)
             .populate('category')
+            .sort(sortOption) // ✅ thêm sort
             .skip((page - 1) * limit)
             .limit(parseInt(limit));
         const total = await ProductModel.countDocuments(filters);
@@ -1639,10 +1742,11 @@ const filterProducts = async (req, res) => {
             total,
             page: parseInt(page),
             totalPages: Math.ceil(total / limit),
+            searchLevel,
         };
 
         // ✅ Lưu vào cache (TTL 60 giây)
-        await redisClient.setEx(cacheKey, 60, JSON.stringify(response));
+        await redisConfig.setEx(cacheKey, 60, JSON.stringify(response));
 
         return res.status(200).json(response);
     } catch (error) {
@@ -1653,37 +1757,65 @@ const filterProducts = async (req, res) => {
     }
 };
 
-const sortByCriteria = (products, sortBy, order) => {
-    if (!Array.isArray(products)) {
-        console.error('Products is not an array:', products);
-        return [];
-    }
-    return products.sort((a, b) => {
-        if (sortBy === 'name') {
-            return order === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
-        }
-        if (sortBy === 'price') {
-            return order === 'asc' ? a.price - b.price : b.price - a.price;
-        }
-        return 0;
-    });
-};
+// const sortByCriteria = (products, sortBy, order) => {
+//     if (!Array.isArray(products)) {
+//         console.error('Products is not an array:', products);
+//         return [];
+//     }
+//     return products.sort((a, b) => {
+//         if (sortBy === 'name') {
+//             return order === 'asc' ? a.name.localeCompare(b.name) : b.name.localeCompare(a.name);
+//         }
+//         if (sortBy === 'price') {
+//             return order === 'asc' ? a.price - b.price : b.price - a.price;
+//         }
+//         return 0;
+//     });
+// };
+
+// const sortProducts = async (req, res) => {
+//     try {
+//         const { products, sortBy, order } = req.body;
+//         const sortedProducts = sortByCriteria([...products], sortBy, order);
+
+//         return res.status(200).json({
+//             success: true,
+//             products: sortedProducts,
+//             page: 0,
+//             totalPages: 0,
+//         });
+//     } catch (error) {
+//         return res.status(500).json({
+//             message: error.message || error,
+//             success: false,
+//         });
+//     }
+// };
 
 const sortProducts = async (req, res) => {
     try {
-        const { products, sortBy, order } = req.body;
-        const sortedProducts = sortByCriteria([...products], sortBy, order);
+        const { sortBy = 'name', order = 'asc', page = 1, limit = 20 } = req.body;
+
+        const sortOption = {};
+        sortOption[sortBy] = order === 'asc' ? 1 : -1;
+
+        const products = await ProductModel.find()
+            .sort(sortOption)
+            .skip((page - 1) * limit)
+            .limit(limit);
+
+        const total = await ProductModel.countDocuments();
 
         return res.status(200).json({
             success: true,
-            products: sortedProducts,
-            page: 0,
-            totalPages: 0,
+            products,
+            page,
+            totalPages: Math.ceil(total / limit),
         });
     } catch (error) {
         return res.status(500).json({
-            message: error.message || error,
             success: false,
+            message: error.message || error,
         });
     }
 };
@@ -1700,7 +1832,7 @@ const searchProducts = async (req, res) => {
             return res.status(400).json({ success: false, message: 'Thiếu từ khóa tìm kiếm' });
         }
 
-        const cachedSearchProducts = await redisClient.get(`search:${query}`);
+        const cachedSearchProducts = await redisConfig.get(`search:${query}`);
         if (cachedSearchProducts) {
             console.log('📌 Lấy search product từ cache:', query);
             return res.status(200).json({
@@ -1722,7 +1854,7 @@ const searchProducts = async (req, res) => {
                 // { brand: { $regex: regex } },
             ],
         });
-        redisClient.setex(`search:${query}`, process.env.DEFAULT_EXPIRATION, JSON.stringify(products));
+        redisConfig.setex(`search:${query}`, process.env.DEFAULT_EXPIRATION, JSON.stringify(products));
 
         console.log('📌 Lấy search product từ DB:', query);
 
@@ -1749,7 +1881,7 @@ const searchProductResults = async (req, res) => {
         return res.status(400).json({ success: false, message: 'Thiếu từ khóa tìm kiếm' });
     }
     try {
-        const cachedSearchProducts = await redisClient.get(`search:${keyword}`);
+        const cachedSearchProducts = await redisConfig.get(`search:${keyword}`);
         if (cachedSearchProducts) {
             console.log('📌 Lấy search product results từ cache:', keyword);
             return res.status(200).json({
@@ -1764,7 +1896,7 @@ const searchProductResults = async (req, res) => {
         });
 
         // Save vào cache
-        redisClient.setex(`search:${keyword}`, process.env.DEFAULT_EXPIRATION, JSON.stringify(products));
+        redisConfig.setex(`search:${keyword}`, process.env.DEFAULT_EXPIRATION, JSON.stringify(products));
 
         console.log('📌 Lấy search product results từ DB:', keyword);
 
@@ -1833,14 +1965,11 @@ const getSearchProductsHistory = async (req, res) => {
 
 export {
     createProduct,
-    createProductRam,
-    createProductWeight,
     createProductSize,
     getProductsAdmin,
     getProductsUser,
-    getProductsRam,
-    getProductsWeight,
     getProductsSize,
+    getProductsByCategorySlug,
     getProductsByCategoryId,
     getProductsByCategoryName,
     getProductsBySubCategoryId,
@@ -1850,7 +1979,7 @@ export {
     getProductsByPrice,
     getProductsByRating,
     getProductsCount,
-    getProductsByFeature,
+    getLatestProducts,
     deleteProduct,
     deleteMultipleProduct,
     deleteProductRam,

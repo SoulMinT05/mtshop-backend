@@ -6,7 +6,7 @@ if (!process.env.MONGODB_URI) {
     throw new Error('Bạn chưa có MONGODB_URL trong .env!');
 }
 
-const dbConnect = async () => {
+const dbConfig = async () => {
     try {
         await mongoose.connect(process.env.MONGODB_URI);
         console.log('DB connect successfully');
@@ -16,4 +16,4 @@ const dbConnect = async () => {
     }
 };
 
-export default dbConnect;
+export default dbConfig;

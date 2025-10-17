@@ -4,8 +4,8 @@ import StaffModel from '../models/StaffModel.js';
 import MessageModel from '../models/MessageModel.js';
 import NotificationModel from '../models/NotificationModel.js';
 
-import { populateUsersStaffsInMessages } from '../utils/populateUserStaffInMessages.js';
-import { emitNotificationSendMessage, emitSendMessage } from '../config/socket.js';
+import { populateUsersStaffsInMessages } from '../utils/populateUtils.js';
+import { emitNotificationSendMessage, emitSendMessage } from '../config/socketConfig.js';
 
 cloudinary.config({
     cloud_name: process.env.CLOUDINARY_NAME,

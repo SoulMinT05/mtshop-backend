@@ -2,6 +2,10 @@ import mongoose from 'mongoose';
 
 const userSchema = mongoose.Schema(
     {
+        userId: {
+            type: String, // userId cho crawl product data
+            unique: true,
+        },
         name: {
             type: String,
             required: [true, 'Provide name'],
@@ -12,7 +16,7 @@ const userSchema = mongoose.Schema(
         },
         password: {
             type: String,
-            required: [true, 'Provide password'],
+            // required: [true, 'Provide password'],
         },
         avatar: {
             type: String,
@@ -20,7 +24,7 @@ const userSchema = mongoose.Schema(
         },
         phoneNumber: {
             type: String,
-            default: null,
+            default: '',
         },
         emailVerified: {
             type: Boolean,
@@ -72,10 +76,10 @@ const userSchema = mongoose.Schema(
                 },
             },
         ],
-        review: {
-            type: mongoose.Schema.ObjectId,
-            ref: 'review',
-        },
+        // review: {
+        //     type: mongoose.Schema.ObjectId,
+        //     ref: 'review',
+        // },
         shoppingCart: [
             {
                 product: {

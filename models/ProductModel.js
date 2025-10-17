@@ -1,22 +1,42 @@
 import mongoose from 'mongoose';
+import slugify from 'slugify';
 
 const productSchema = mongoose.Schema(
     {
+        // _id: {
+        //     type: String, // ép _id thành String
+        // },
+        productId: {
+            type: String, // productId cho crawl product data
+            unique: true,
+        },
         name: {
             type: String,
-            // required: true,
         },
         slug: {
             type: String,
         },
+        categorySlug: {
+            // slug của categoryName
+            type: String,
+            default: '',
+        },
+        subCategorySlug: {
+            // slug của categoryName
+            type: String,
+            default: '',
+        },
+        thirdSubCategorySlug: {
+            // slug của categoryName
+            type: String,
+            default: '',
+        },
         description: {
             type: String,
-            // required: true,
         },
         images: [
             {
                 type: String,
-                // required: true,
             },
         ],
         brand: {
@@ -47,7 +67,6 @@ const productSchema = mongoose.Schema(
             type: String,
             default: '',
         },
-
         thirdSubCategoryId: {
             type: String,
             default: '',
@@ -59,10 +78,13 @@ const productSchema = mongoose.Schema(
         category: {
             type: mongoose.Schema.ObjectId,
             ref: 'category',
-            // required: true,
         },
         countInStock: {
             type: Number,
+        },
+        quantitySold: {
+            type: Number,
+            default: 0,
         },
         averageRating: {
             type: Number,
@@ -94,19 +116,7 @@ const productSchema = mongoose.Schema(
             type: Number,
             // required: true,
         },
-        productRam: [
-            {
-                type: String,
-                default: null,
-            },
-        ],
         productSize: [
-            {
-                type: String,
-                default: null,
-            },
-        ],
-        productWeight: [
             {
                 type: String,
                 default: null,
@@ -127,6 +137,16 @@ const productSchema = mongoose.Schema(
         timestamps: true,
     }
 );
+
+productSchema.pre('save', function (next) {
+    // chỉ chạy khi tạo mới, không override khi update
+    if (this.isNew && !this.slug) {
+        // _id đã được generate trước khi save
+        const baseSlug = slugify(this.name, { lower: true, strict: true });
+        this.slug = `${baseSlug}-p${this._id}`;
+    }
+    next();
+});
 
 const ProductModel = mongoose.model('product', productSchema);
 export default ProductModel;

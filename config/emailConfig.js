@@ -11,10 +11,11 @@ const transporter = nodemailer.createTransport({
     },
 });
 
-const sendEmail = async (to, subject, text, html) => {
+export const sendEmail = async (to, subject, text, html) => {
     try {
         const info = await transporter.sendMail({
-            from: process.env.EMAIL, // sender address
+            // from: process.env.EMAIL, // sender address
+            from: '"RubyStore" <no-reply@rubystore.com>',
             to, // list of receivers
             subject, // Subject line
             text, // plain text body
@@ -33,4 +34,11 @@ const sendEmail = async (to, subject, text, html) => {
     }
 };
 
-export default sendEmail;
+export const sendAccountConfirmationEmail = async (to, subject, text, html) => {
+    const result = await sendEmail(to, subject, text, html);
+    if (result.success) {
+        return true;
+    } else {
+        return false;
+    }
+};

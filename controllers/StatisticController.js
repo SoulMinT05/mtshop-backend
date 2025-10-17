@@ -7,7 +7,7 @@ import VoucherModel from '../models/VoucherModel.js';
 import BlogModel from '../models/BlogModel.js';
 import ReviewModel from '../models/ReviewModel.js';
 
-import { getOnlineUsers } from '../config/socket.js';
+import { getOnlineUsers } from '../config/socketConfig.js';
 import { formatCurrency } from '../utils/formatUtils.js';
 
 import { v2 as cloudinary } from 'cloudinary';
