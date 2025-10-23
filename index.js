@@ -15,10 +15,34 @@ import helmet from 'helmet';
 import dbConfig from './config/dbConfig.js';
 import route from './routes/index.js';
 
+const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    process.env.FRONTEND_ADMIN_URL,
+    process.env.FRONTEND_URL_DOCKER,
+    process.env.FRONTEND_ADMIN_URL_DOCKER,
+    'http://localhost',
+    'http://localhost:80',
+];
+
+const frontendUrl = process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL_DOCKER : process.env.FRONTEND_URL;
+const frontendAdminUrl =
+    process.env.NODE_ENV === 'production' ? process.env.FRONTEND_ADMIN_URL_DOCKER : process.env.FRONTEND_ADMIN_URL;
+
 const app = express();
 app.use(
+    // cors({
+    //     origin: [frontendUrl, frontendAdminUrl, 'localhost'],
+    //     credentials: true,
+    // })
     cors({
-        origin: [process.env.FRONTEND_URL, process.env.FRONTEND_ADMIN_URL],
+        origin: (origin, callback) => {
+            // Cho phép request từ Postman hoặc browser không có origin
+            if (!origin || allowedOrigins.includes(origin)) {
+                callback(null, true);
+            } else {
+                callback(new Error(`Not allowed by CORS: ${origin}`));
+            }
+        },
         credentials: true,
     })
 );

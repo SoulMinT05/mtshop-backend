@@ -4,4 +4,3 @@ myenv
 *.csv
 .venv
 category_tree.json
-data

@@ -1,6 +1,15 @@
 import Redis from 'redis';
 
-const redisConfig = Redis.createClient();
+const isProd = process.env.NODE_ENV === 'production';
+const redisHost = isProd ? process.env.REDIS_HOST : 'localhost';
+const redisPort = process.env.REDIS_PORT;
+
+const redisConfig = Redis.createClient({
+    socket: {
+        host: redisHost,
+        port: redisPort,
+    },
+});
 
 redisConfig.on('error', (err) => console.log('Redis Client Error', err));
 

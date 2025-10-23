@@ -1,0 +1,42 @@
+services:
+    backend:
+        build: .
+        ports:
+            - '5000:5000'
+        env_file: .env
+        environment:
+            - NODE_ENV=production
+        depends_on:
+            - redis
+            - mongo
+        restart: always
+
+    redis:
+        image: redis:latest
+        ports:
+            - '6379:6379'
+        restart: always
+
+    mongo:
+        image: mongo:latest
+        container_name: rubystore-backend-mongo
+        ports:
+            - '27017:27017'
+        volumes:
+            - mongo_data:/data/db # Dev mode
+            # - ./data/mongo:/data/db # Prod mode
+        restart: always
+
+volumes:
+    mongo_data:
+# BE:
+# mongodump --uri="mongodb://127.0.0.1:27017/rubystore" --out="./backup_rubystore"
+# docker cp ./backup_rubystore/rubystore rubystore-backend-mongo:/backup_rubystore
+# docker exec -it rubystore-backend-mongo mongorestore --drop /backup_rubystore
+# docker exec -it rubystore-backend-mongo mongorestore --drop --db rubystore /backup_rubystore/rubystore
+
+#Test:
+# docker exec -it rubystore-backend-mongo mongosh
+
+# FE:
+# docker-compose --env-file .env.docker up --build -d

@@ -9,10 +9,24 @@ let io = null;
 const onlineUsers = new Map(); // Map(1) { 'user1' => Set(1) { 'socket1' } }
 // '6807819d2352180e82e5ae6e': [ 'Z0X2Nu-eEzNJyik0AAAF' ]
 
+const allowedOrigins = [
+    process.env.FRONTEND_URL,
+    process.env.FRONTEND_ADMIN_URL,
+    process.env.FRONTEND_URL_DOCKER,
+    process.env.FRONTEND_ADMIN_URL_DOCKER,
+    'http://localhost',
+    'http://localhost:80',
+];
+
+const frontendUrl = process.env.NODE_ENV === 'production' ? process.env.FRONTEND_URL_DOCKER : process.env.FRONTEND_URL;
+const frontendAdminUrl =
+    process.env.NODE_ENV === 'production' ? process.env.FRONTEND_ADMIN_URL_DOCKER : process.env.FRONTEND_ADMIN_URL;
+
 export const initSocket = (server) => {
     io = new Server(server, {
         cors: {
-            origin: [process.env.FRONTEND_URL, process.env.FRONTEND_ADMIN_URL],
+            // origin: [frontendUrl, frontendAdminUrl, 'localhost'],
+            origin: allowedOrigins,
             credentials: true,
         },
     });

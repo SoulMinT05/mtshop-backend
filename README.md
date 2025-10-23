@@ -108,6 +108,34 @@ yarn start
 
 The app will be available at `http://localhost:3001` by default.
 
+## Docker Setup (Recommended)
+
+If you prefer running the entire backend using Docker, follow these steps:
+
+### 1. Restore the MongoDB database (optional)
+
+If you already have a MongoDB backup (for example, the folder ./backup_rubystore), you can restore it using the following commands:
+
+```bash
+# Create a backup from your local MongoDB (if needed)
+mongodump --uri="mongodb://127.0.0.1:27017/rubystore" --out="./backup_rubystore"
+
+# Copy the backup folder into the MongoDB container
+docker cp ./backup_rubystore/rubystore rubystore-backend-mongo:/backup_rubystore
+
+# Restore the entire database (only use for backend)
+docker exec -it rubystore-backend-mongo mongorestore --drop /backup_rubystore
+
+# Or restore a specific database only (use for frontend + backend)
+docker exec -it rubystore-backend-mongo mongorestore --drop --db rubystore /backup_rubystore/rubystore
+```
+
+### 2. Build and run Docker container
+
+```bash
+docker-compose up --build
+```
+
 ## License
 
 This project is licensed under the MIT License. See the [LICENSE](LICENSE) file for details.
