@@ -1696,25 +1696,40 @@ const getReviewsBySlugProduct = async (req, res) => {
             return res.status(400).json({ message: 'Slug sản phẩm không đúng định dạng.' });
         }
 
+        const { filters } = req.query; // string
+        const filterArray = filters ? filters.split(',') : []; // array
+
         const rawId = match[1];
         const isObjectId = mongoose.Types.ObjectId.isValid(rawId);
-        console.log({ rawId, isObjectId });
 
         const page = parseInt(req.query.page) || 1;
         const perPage = parseInt(req.query.perPage) || process.env.LIMIT_DEFAULT;
         const skip = (page - 1) * perPage;
 
-        let query = {};
+        let baseQuery = {};
         if (isObjectId) {
-            query.productId = new mongoose.Types.ObjectId(rawId);
+            baseQuery.productId = new mongoose.Types.ObjectId(rawId);
         } else {
-            query.productIdCrawl = rawId;
+            baseQuery.productIdCrawl = rawId;
         }
 
-        console.log(1);
+        const filterReviewsQuery = { ...baseQuery };
 
-        const [reviews, totalReviews] = await Promise.all([
-            ReviewModel.find(query)
+        // Filters review
+        const ratingFilters = filterArray.filter((f) => ['1', '2', '3', '4', '5'].includes(f));
+        if (ratingFilters.length > 0) {
+            filterReviewsQuery.rating = { $in: ratingFilters.map(Number) };
+        }
+
+        if (filterArray.includes('hasImage')) {
+            filterReviewsQuery.isPhoto = true;
+        }
+
+        let sortOption = { createdAt: -1 }; // mặc định newest
+        if (filterArray.includes('oldest')) sortOption = { createdAt: 1 };
+
+        const [reviews, totalReviews, ratingSummary] = await Promise.all([
+            ReviewModel.find(filterReviewsQuery)
                 .populate([
                     {
                         path: 'userId',
@@ -1727,18 +1742,37 @@ const getReviewsBySlugProduct = async (req, res) => {
                 ])
                 .skip(skip)
                 .limit(perPage)
-                .sort({ createdAt: -1 }), // mới nhất trước
-            ReviewModel.countDocuments(query),
+                .sort(sortOption),
+            ReviewModel.countDocuments(baseQuery),
+            ReviewModel.aggregate([
+                { $match: baseQuery },
+                {
+                    $group: {
+                        _id: '$rating',
+                        count: { $sum: 1 },
+                    },
+                },
+            ]),
         ]);
+
+        const ratingCount = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+        // 🔹 Ghi đè giá trị có trong kết quả aggregate
+        ratingSummary.forEach((item) => {
+            const key = item._id?.toString();
+            if (ratingCount[key] !== undefined) {
+                ratingCount[key] = item.count;
+            }
+        });
+
         res.status(200).json({
             success: true,
-            // productId,
-            query,
+            query: filterReviewsQuery,
             reviews,
             totalPages: Math.ceil(totalReviews / perPage),
             totalReviews,
             page,
             perPage,
+            ratingCount,
         });
     } catch (error) {
         console.error('Lỗi khi lấy danh sách review:', error.message);
